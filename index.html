@@ -1,0 +1,448 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset='utf-8' />
+    <title>MapLibre Storytelling</title>
+    <meta name='viewport' content='initial-scale=1,maximum-scale=1,user-scalable=no' />
+    <link rel="icon" type="image/svg+xml" href="https://maplibre.org/favicon.ico">
+    <script src='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js'></script>
+    <link href='https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css' rel='stylesheet' />
+    <script src="https://unpkg.com/scrollama"></script>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+        }
+
+        a,
+        a:hover,
+        a:visited {
+            color: #0071bc;
+        }
+
+        #map {
+            top: 0;
+            height: 100vh;
+            width: 100vw;
+            position: fixed;
+        }
+
+        #header {
+            margin: auto;
+            width: 100%;
+            position: relative;
+            z-index: 5;
+        }
+
+        #header h1,
+        #header h2,
+        #header p {
+            margin: 0;
+            padding: 2vh 2vw;
+            text-align: center;
+        }
+
+        #footer {
+            width: 100%;
+            min-height: 5vh;
+            padding-top: 2vh;
+            padding-bottom: 2vh;
+            text-align: center;
+            line-height: 25px;
+            font-size: 13px;
+            position: relative;
+            z-index: 5;
+        }
+
+        #features {
+            padding-top: 10vh;
+            padding-bottom: 10vh;
+        }
+
+        .hidden {
+            visibility: hidden;
+        }
+
+        .centered {
+            width: 50vw;
+            margin: 0 auto;
+        }
+
+        .lefty {
+            width: 33vw;
+            margin-left: 5vw;
+        }
+
+        .righty {
+            width: 33vw;
+            margin-left: 62vw;
+        }
+
+        .fully {
+            width: 100%;
+            margin: auto;
+        }
+
+        .light {
+            color: #444;
+            background-color: #fafafa;
+        }
+
+        .dark {
+            color: #fafafa;
+            background-color: #444;
+        }
+
+        .step {
+            padding-bottom: 50vh;
+            opacity: 0.25;
+        }
+
+        .step.active {
+            opacity: 0.9;
+        }
+
+        .step div {
+            padding: 25px 50px;
+            line-height: 25px;
+            font-size: 13px;
+        }
+
+        .step img {
+            width: 100%;
+        }
+
+        @media (max-width: 750px) {
+
+            .centered,
+            .lefty,
+            .righty,
+            .fully {
+                width: 90vw;
+                margin: 0 auto;
+            }
+        }
+
+        /* Fix issue on mobile browser where scroll breaks */
+        .maplibregl-canvas-container.maplibregl-touch-zoom-rotate.maplibregl-touch-drag-pan,
+        .maplibregl-canvas-container.maplibregl-touch-zoom-rotate.maplibregl-touch-drag-pan .maplibregl-canvas {
+            touch-action: unset;
+        }
+
+        /* Inset minimap styles */
+        #inset-map {
+            position: fixed;
+            width: 180px;
+            height: 180px;
+            border: 2px solid rgba(255, 255, 255, 0.8);
+            border-radius: 4px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
+            z-index: 10;
+        }
+
+        #inset-map.top-left {
+            top: 10px;
+            left: 10px;
+        }
+
+        #inset-map.top-right {
+            top: 10px;
+            right: 10px;
+        }
+
+        #inset-map.bottom-left {
+            bottom: 30px;
+            left: 10px;
+        }
+
+        #inset-map.bottom-right {
+            bottom: 30px;
+            right: 10px;
+        }
+
+        .inset-marker {
+            width: 12px;
+            height: 12px;
+            background-color: #ff6b6b;
+            border: 2px solid white;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+    </style>
+</head>
+
+<body>
+
+    <div id="map"></div>
+    <div id="story"></div>
+
+    <script src="./config.js"></script>
+    <script>
+        var initLoad = true;
+        var layerTypes = {
+            'fill': ['fill-opacity'],
+            'line': ['line-opacity'],
+            'circle': ['circle-opacity', 'circle-stroke-opacity'],
+            'symbol': ['icon-opacity', 'text-opacity'],
+            'raster': ['raster-opacity'],
+            'fill-extrusion': ['fill-extrusion-opacity'],
+            'heatmap': ['heatmap-opacity'],
+            'hillshade': ['hillshade-exaggeration']
+        }
+
+        var alignments = {
+            'left': 'lefty',
+            'center': 'centered',
+            'right': 'righty',
+            'full': 'fully'
+        }
+
+        function getLayerPaintType(layer) {
+            var layerType = map.getLayer(layer).type;
+            return layerTypes[layerType];
+        }
+
+        function setLayerOpacity(layer) {
+            var paintProps = getLayerPaintType(layer.layer);
+            paintProps.forEach(function (prop) {
+                var options = {};
+                if (layer.duration) {
+                    var transitionProp = prop + "-transition";
+                    options = { "duration": layer.duration };
+                    map.setPaintProperty(layer.layer, transitionProp, options);
+                }
+                map.setPaintProperty(layer.layer, prop, layer.opacity, options);
+            });
+        }
+
+        var story = document.getElementById('story');
+        var features = document.createElement('div');
+        features.setAttribute('id', 'features');
+
+        var header = document.createElement('div');
+
+        if (config.title) {
+            var titleText = document.createElement('h1');
+            titleText.innerText = config.title;
+            header.appendChild(titleText);
+        }
+
+        if (config.subtitle) {
+            var subtitleText = document.createElement('h2');
+            subtitleText.innerText = config.subtitle;
+            header.appendChild(subtitleText);
+        }
+
+        if (config.byline) {
+            var bylineText = document.createElement('p');
+            bylineText.innerText = config.byline;
+            header.appendChild(bylineText);
+        }
+
+        if (header.innerText.length > 0) {
+            header.classList.add(config.theme);
+            header.setAttribute('id', 'header');
+            story.appendChild(header);
+        }
+
+        config.chapters.forEach((record, idx) => {
+            var container = document.createElement('div');
+            var chapter = document.createElement('div');
+
+            if (record.title) {
+                var title = document.createElement('h3');
+                title.innerText = record.title;
+                chapter.appendChild(title);
+            }
+
+            if (record.image) {
+                var image = new Image();
+                image.src = record.image;
+                chapter.appendChild(image);
+            }
+
+            if (record.description) {
+                var story = document.createElement('p');
+                story.innerHTML = record.description;
+                chapter.appendChild(story);
+            }
+
+            container.setAttribute('id', record.id);
+            container.classList.add('step');
+            if (idx === 0) {
+                container.classList.add('active');
+            }
+
+            chapter.classList.add(config.theme);
+            container.appendChild(chapter);
+            container.classList.add(alignments[record.alignment] || 'centered');
+            if (record.hidden) {
+                container.classList.add('hidden');
+            }
+            features.appendChild(container);
+        });
+
+        story.appendChild(features);
+
+        var footer = document.createElement('div');
+
+        if (config.footer) {
+            var footerText = document.createElement('p');
+            footerText.innerHTML = config.footer;
+            footer.appendChild(footerText);
+        }
+
+        if (footer.innerText.length > 0) {
+            footer.classList.add(config.theme);
+            footer.setAttribute('id', 'footer');
+            story.appendChild(footer);
+        }
+
+        // Initialize MapLibre map
+        var map = new maplibregl.Map({
+            container: 'map',
+            style: config.style,
+            center: config.chapters[0].location.center,
+            zoom: config.chapters[0].location.zoom,
+            bearing: config.chapters[0].location.bearing,
+            pitch: config.chapters[0].location.pitch,
+            interactive: false
+        });
+
+        // Create inset map if enabled
+        var insetMap = null;
+        var insetMarker = null;
+
+        if (config.inset) {
+            var insetContainer = document.createElement('div');
+            insetContainer.id = 'inset-map';
+            insetContainer.classList.add(config.insetPosition || 'bottom-right');
+            document.body.appendChild(insetContainer);
+
+            insetMap = new maplibregl.Map({
+                container: 'inset-map',
+                style: config.insetStyle || 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json',
+                center: config.chapters[0].location.center,
+                zoom: config.insetZoom || 1,
+                interactive: false,
+                attributionControl: false
+            });
+
+            // Add marker to inset map
+            var markerEl = document.createElement('div');
+            markerEl.className = 'inset-marker';
+            if (config.insetOptions && config.insetOptions.markerColor) {
+                markerEl.style.backgroundColor = config.insetOptions.markerColor;
+            }
+            insetMarker = new maplibregl.Marker({ element: markerEl })
+                .setLngLat(config.chapters[0].location.center)
+                .addTo(insetMap);
+        }
+
+        // Create marker if enabled
+        var marker = null;
+        if (config.showMarkers) {
+            marker = new maplibregl.Marker({ color: config.markerColor });
+            marker.setLngLat(config.chapters[0].location.center).addTo(map);
+        }
+
+        // Instantiate the scrollama
+        var scroller = scrollama();
+
+        map.on("load", function () {
+            // Add 3D terrain if enabled
+            if (config.use3dTerrain) {
+                map.addSource('terrain-dem', {
+                    'type': 'raster-dem',
+                    'url': config.terrainSource || 'https://demotiles.maplibre.org/terrain-tiles/tiles.json',
+                    'tileSize': 256
+                });
+                map.setTerrain({
+                    'source': 'terrain-dem',
+                    'exaggeration': config.terrainExaggeration || 1.5
+                });
+
+                // Add sky layer for pitched views
+                if (map.getLayer('sky') === undefined) {
+                    map.addLayer({
+                        'id': 'sky',
+                        'type': 'sky',
+                        'paint': {
+                            'sky-type': 'atmosphere',
+                            'sky-atmosphere-sun': [0.0, 90.0],
+                            'sky-atmosphere-sun-intensity': 15
+                        }
+                    });
+                }
+            }
+
+            // Setup scrollama
+            scroller
+                .setup({
+                    step: '.step',
+                    offset: 0.5,
+                    progress: true
+                })
+                .onStepEnter(async response => {
+                    var current_chapter = config.chapters.findIndex(chap => chap.id === response.element.id);
+                    var chapter = config.chapters[current_chapter];
+
+                    response.element.classList.add('active');
+                    map[chapter.mapAnimation || 'flyTo'](chapter.location);
+
+                    // Update main marker
+                    if (config.showMarkers && marker) {
+                        marker.setLngLat(chapter.location.center);
+                    }
+
+                    // Update inset map
+                    if (insetMap && insetMarker) {
+                        insetMap.setCenter(chapter.location.center);
+                        insetMarker.setLngLat(chapter.location.center);
+                    }
+
+                    if (chapter.onChapterEnter.length > 0) {
+                        chapter.onChapterEnter.forEach(setLayerOpacity);
+                    }
+                    if (chapter.callback) {
+                        window[chapter.callback]();
+                    }
+                    if (chapter.rotateAnimation) {
+                        map.once('moveend', () => {
+                            const rotateNumber = map.getBearing();
+                            map.rotateTo(rotateNumber + 180, {
+                                duration: 30000, easing: function (t) {
+                                    return t;
+                                }
+                            });
+                        });
+                    }
+                    if (config.auto) {
+                        var next_chapter = (current_chapter + 1) % config.chapters.length;
+                        map.once('moveend', () => {
+                            document.querySelectorAll('[data-scrollama-index="' + next_chapter.toString() + '"]')[0].scrollIntoView();
+                        });
+                    }
+                })
+                .onStepExit(response => {
+                    var chapter = config.chapters.find(chap => chap.id === response.element.id);
+                    response.element.classList.remove('active');
+                    if (chapter.onChapterExit.length > 0) {
+                        chapter.onChapterExit.forEach(setLayerOpacity);
+                    }
+                });
+
+            if (config.auto) {
+                document.querySelectorAll('[data-scrollama-index="0"]')[0].scrollIntoView();
+            }
+        });
+
+        // Handle window resize
+        window.addEventListener('resize', scroller.resize);
+    </script>
+
+</body>
+
+</html>
